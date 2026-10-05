@@ -7,6 +7,17 @@ process.env.TZ = process.env.TZ || process.env.APP_TIMEZONE || 'Asia/Tashkent';
 
 const { handle } = await import('./src/app.js');
 
+// AUTO_SEED=1 → fill an empty database with starter content (no demo accounts) on first start
+if (process.env.AUTO_SEED === '1') {
+  const { q } = await import('./src/db.js');
+  if (q.get('SELECT COUNT(*) n FROM courses').n === 0) {
+    const { execFileSync } = await import('node:child_process');
+    try {
+      execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/seed.js', '--no-demo'], { stdio: 'inherit' });
+    } catch (e) { console.error('Auto-seed failed:', e.message); }
+  }
+}
+
 const server = http.createServer((req, res) => {
   handle(req, res).catch((e) => {
     console.error(e);
