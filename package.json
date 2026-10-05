@@ -1,0 +1,15 @@
+{
+  "name": "jumis-ai",
+  "version": "1.0.0",
+  "description": "Jumis AI — learning, careers and AI guidance platform (Karakalpak / Uzbek / Russian / English)",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
+    "make-admin": "node --disable-warning=ExperimentalWarning scripts/make-admin.js",
+    "check": "node --disable-warning=ExperimentalWarning scripts/check-i18n.js"
+  }
+}
