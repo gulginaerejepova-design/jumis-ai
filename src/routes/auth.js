@@ -1,7 +1,7 @@
 // Login, registration, onboarding, password reset, logout.
 import { q, sha256, randomToken, notify } from '../db.js';
 import { send, redirect, readForm, field, safeNext, HttpError } from '../http.js';
-import { hashPassword, verifyPassword, createSession, destroySession, rateLimit, requireUser } from '../auth.js';
+import { hashPassword, verifyPassword, createSession, destroySession, rateLimit, requireUser, normalizePhone, phoneTaken, findUserByLogin } from '../auth.js';
 import { sendEmail } from '../services.js';
 import { page } from '../views/layout.js';
 import { html, raw } from '../views/html.js';
@@ -33,14 +33,14 @@ function typeChoices(ctx, selected) {
 }
 
 // ─── Login ────────────────────────────────────────────────────────────────────
-function loginForm(ctx, { error, email = '' } = {}) {
+function loginForm(ctx, { error, login = '' } = {}) {
   const { t } = ctx;
   const next = safeNext(ctx.url.searchParams.get('next'), '');
   return authShell(ctx, t('login_title'), html`
     <div class="card card-pad stack">
       ${errBox(error)}
       <form method="post" action="/login${next ? `?next=${encodeURIComponent(next)}` : ''}" class="stack">
-        <label class="field"><span>${t('email')}</span><input class="input" type="email" name="email" value="${email}" required autocomplete="email" autofocus></label>
+        <label class="field"><span>${t('email_or_phone')}</span><input class="input" name="login" value="${login}" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="${t('email_or_phone_ph')}" autofocus></label>
         <label class="field"><span class="row between">${t('password')}<a href="/forgot" class="xs text-primary">${t('forgot_password')}</a></span><input class="input" type="password" name="password" required autocomplete="current-password"></label>
         <button class="btn btn-primary btn-block btn-lg">${t('login')}</button>
       </form>
@@ -50,12 +50,12 @@ function loginForm(ctx, { error, email = '' } = {}) {
 
 async function login(ctx) {
   const form = await readForm(ctx);
-  const email = field(form, 'email', 200).toLowerCase();
+  const login = field(form, 'login', 200) || field(form, 'email', 200);
   const password = field(form, 'password', 200);
-  rateLimit('login:' + (ctx.req.socket.remoteAddress || '') + email, 10);
-  const user = q.get('SELECT * FROM users WHERE email = ?', email);
+  rateLimit('login:' + (ctx.req.socket.remoteAddress || '') + login.toLowerCase(), 10);
+  const user = findUserByLogin(login);
   if (!user || !verifyPassword(password, user.password_hash)) {
-    return send(ctx, 401, loginForm(ctx, { error: ctx.t('bad_login'), email }));
+    return send(ctx, 401, loginForm(ctx, { error: ctx.t('bad_login'), login }));
   }
   createSession(ctx, user.id);
   redirect(ctx, safeNext(ctx.url.searchParams.get('next'), '/dashboard'));
@@ -72,6 +72,7 @@ function registerForm(ctx, { error, values = {} } = {}) {
       <form method="post" action="/register${next ? `?next=${encodeURIComponent(next)}` : ''}" class="stack">
         <label class="field"><span>${t('full_name')}</span><input class="input" name="full_name" value="${values.full_name || ''}" required maxlength="120" autocomplete="name"></label>
         <label class="field"><span>${t('email')}</span><input class="input" type="email" name="email" value="${values.email || ''}" required autocomplete="email"></label>
+        <label class="field"><span>${t('phone')}</span><input class="input" type="tel" name="phone" value="${values.phone || ''}" maxlength="20" autocomplete="tel" placeholder="+998 90 123 45 67"><div class="hint">${t('phone_login_hint')}</div></label>
         <label class="field"><span>${t('password')}</span><input class="input" type="password" name="password" required minlength="8" autocomplete="new-password"><div class="hint">${t('password_hint')}</div></label>
         <div><span class="label">${t('who_are_you')}</span>${typeChoices(ctx, type)}</div>
         <label class="field" data-show-for="user_type" data-show-when="organization"><span>${t('organization_name')}</span><input class="input" name="organization_name" value="${values.organization_name || ''}" maxlength="150"></label>
@@ -89,7 +90,9 @@ async function register(ctx) {
   const values = {
     full_name: field(form, 'full_name', 120), email: field(form, 'email', 200).toLowerCase(),
     user_type: field(form, 'user_type', 20), organization_name: field(form, 'organization_name', 150),
+    phone: field(form, 'phone', 20),
   };
+  const phone = normalizePhone(values.phone);
   const password = field(form, 'password', 200);
   let error;
   if (!values.full_name) error = t('err_name');
@@ -97,13 +100,16 @@ async function register(ctx) {
   else if (password.length < 8) error = t('password_hint');
   else if (!['student', 'teacher', 'organization'].includes(values.user_type)) error = t('err_type');
   else if (values.user_type === 'organization' && !values.organization_name) error = t('err_org_name');
+  else if (values.user_type !== 'organization' && !values.phone) error = t('err_phone_required');
+  else if (values.phone && !phone) error = t('err_phone');
   else if (q.get('SELECT id FROM users WHERE email = ?', values.email)) error = t('err_email_taken');
+  else if (phoneTaken(phone)) error = t('err_phone_taken');
   if (error) return send(ctx, 400, registerForm(ctx, { error, values }));
 
   const firstUser = !q.get("SELECT id FROM users WHERE role = 'admin'");
   const id = q.insert('users', {
     email: values.email, password_hash: hashPassword(password), full_name: values.full_name,
-    user_type: values.user_type, organization_name: values.organization_name || null,
+    user_type: values.user_type, organization_name: values.organization_name || null, phone: phone || null,
     role: firstUser ? 'admin' : 'user',
   });
   if (values.user_type === 'teacher' && !firstUser) requestTeacherApproval(id, values.full_name);
@@ -150,16 +156,16 @@ function forgotPage(ctx, { sent, error } = {}) {
   send(ctx, 200, authShell(ctx, t('reset_title'), html`<div class="card card-pad stack">
     ${sent ? html`<div class="alert alert-success">${icon('check', 'ic-sm')}<div>${t('reset_sent')}</div></div>` : errBox(error)}
     <form method="post" action="/forgot" class="stack">
-      <label class="field"><span>${t('email')}</span><input class="input" type="email" name="email" required></label>
+      <label class="field"><span>${t('email_or_phone')}</span><input class="input" name="login" required autocapitalize="none" placeholder="${t('email_or_phone_ph')}"></label>
       <button class="btn btn-primary btn-block">${t('send_reset')}</button>
     </form></div><p class="center small"><a href="/login" class="text-primary">${t('back_to_login')}</a></p>`));
 }
 
 async function forgot(ctx) {
   const form = await readForm(ctx);
-  const email = field(form, 'email', 200).toLowerCase();
   rateLimit('forgot:' + (ctx.req.socket.remoteAddress || ''), 5);
-  const user = q.get('SELECT id, full_name FROM users WHERE email = ?', email);
+  const user = findUserByLogin(field(form, 'login', 200) || field(form, 'email', 200));
+  const email = user?.email;
   if (user) {
     const token = randomToken();
     q.run('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)', sha256(token), user.id, new Date(Date.now() + 3600e3).toISOString());
