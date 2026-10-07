@@ -23,5 +23,7 @@ export const config = {
   get isProd() { return process.env.NODE_ENV === 'production'; },
   get maxUploadMb() { return Number(process.env.MAX_UPLOAD_MB || 100); },
   get googleVerification() { return process.env.GOOGLE_SITE_VERIFICATION || ''; },
+  /** Emails or phone numbers (comma-separated) whose accounts are always admins */
+  get adminLogins() { return (process.env.ADMIN_LOGINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean); },
   get siteName() { return process.env.SITE_NAME || 'Jumıs AI'; },
 };

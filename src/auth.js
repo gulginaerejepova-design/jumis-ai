@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import { q, sha256, randomToken } from './db.js';
 import { setCookie, HttpError } from './http.js';
+import { config } from './env.js';
 
 const SESSION_DAYS = 30;
 
@@ -39,6 +40,10 @@ export function userFromSession(token) {
   );
   if (!row) return null;
   delete row.password_hash;
+  if (row.role !== 'admin' && isOwnerLogin(row)) {
+    q.run("UPDATE users SET role = 'admin' WHERE id = ?", row.id);
+    row.role = 'admin';
+  }
   return row;
 }
 
@@ -87,4 +92,11 @@ export function findUserByLogin(login) {
   if (!phone) return null;
   const rows = q.all('SELECT * FROM users WHERE phone = ? LIMIT 2', phone);
   return rows.length === 1 ? rows[0] : null;
+}
+
+/** True when ADMIN_LOGINS names this user's email or phone */
+function isOwnerLogin(user) {
+  const list = config.adminLogins;
+  if (!list.length) return false;
+  return list.includes(String(user.email).toLowerCase()) || Boolean(user.phone && list.some((l) => !l.includes('@') && normalizePhone(l) === user.phone));
 }
