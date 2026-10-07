@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import { q, sha256, randomToken } from './db.js';
 import { setCookie, HttpError } from './http.js';
+import { config } from './env.js';
 
 const SESSION_DAYS = 30;
 
@@ -39,6 +40,10 @@ export function userFromSession(token) {
   );
   if (!row) return null;
   delete row.password_hash;
+  if (row.role !== 'admin' && isOwnerLogin(row)) {
+    q.run("UPDATE users SET role = 'admin' WHERE id = ?", row.id);
+    row.role = 'admin';
+  }
   return row;
 }
 
@@ -65,4 +70,33 @@ export function requireRole(ctx, check) {
   requireUser(ctx);
   if (!check(ctx.user)) throw new HttpError(403);
   return ctx.user;
+}
+
+// ─── Phone numbers (login with email or phone) ───────────────────────────────
+/** Normalize a phone to "+<digits>". 9 digits are treated as an Uzbek number (+998). Returns '' if invalid. */
+export function normalizePhone(input) {
+  let digits = String(input || '').replace(/\D/g, '');
+  if (digits.length === 9) digits = '998' + digits;
+  return digits.length >= 10 && digits.length <= 15 ? '+' + digits : '';
+}
+
+/** True when another account already uses this (normalized) phone */
+export const phoneTaken = (phone, exceptUserId = null) =>
+  Boolean(phone && q.get('SELECT id FROM users WHERE phone = ? AND id IS NOT ?', phone, exceptUserId));
+
+/** Find a user by email, or by phone number when the login has no "@" */
+export function findUserByLogin(login) {
+  const value = String(login || '').trim();
+  if (value.includes('@')) return q.get('SELECT * FROM users WHERE email = ?', value.toLowerCase());
+  const phone = normalizePhone(value);
+  if (!phone) return null;
+  const rows = q.all('SELECT * FROM users WHERE phone = ? LIMIT 2', phone);
+  return rows.length === 1 ? rows[0] : null;
+}
+
+/** True when ADMIN_LOGINS names this user's email or phone */
+function isOwnerLogin(user) {
+  const list = config.adminLogins;
+  if (!list.length) return false;
+  return list.includes(String(user.email).toLowerCase()) || Boolean(user.phone && list.some((l) => !l.includes('@') && normalizePhone(l) === user.phone));
 }

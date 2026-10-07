@@ -280,6 +280,16 @@ export function migrate() {
 }
 migrate();
 
+// Phones are stored normalized ("+998901234567") so people can log in with them.
+// Older rows may hold free-form numbers: normalize them, skipping any that are invalid or would clash.
+for (const u of q.all("SELECT id, phone FROM users WHERE phone IS NOT NULL AND phone <> ''")) {
+  let d = u.phone.replace(/\D/g, '');
+  if (d.length === 9) d = '998' + d;
+  const phone = '+' + d;
+  if (phone === u.phone || d.length < 10 || d.length > 15) continue;
+  if (!q.get('SELECT id FROM users WHERE phone = ? AND id <> ?', phone, u.id)) q.run('UPDATE users SET phone = ? WHERE id = ?', phone, u.id);
+}
+
 /** Create an in-app notification */
 export function notify(userId, { type, title, body = '', link = '' }) {
   q.insert('notifications', { user_id: userId, type, title, body, link });

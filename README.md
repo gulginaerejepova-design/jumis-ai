@@ -17,7 +17,7 @@ npm run seed                # adds starter courses, tests, vacancies and demo ac
 npm start                   # → http://localhost:3000
 ```
 
-- The **first account you register becomes the admin.**
+- The **first account you register becomes the admin.** To make any other account an admin, put its email or phone in `ADMIN_LOGINS` (comma-separated) and restart; it becomes admin the next time it opens the site.
 - Demo accounts (password `demo12345`): `student@demo.jumis`, `teacher@demo.jumis`, `org@demo.jumis`. Delete them in **Admin → Users** before going public.
 - To try every AI feature without an API key, put `AI_MOCK=1` in `.env`. AI answers will be samples.
 

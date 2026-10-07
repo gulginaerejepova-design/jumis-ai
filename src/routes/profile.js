@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { q, notify, json } from '../db.js';
 import { send, redirect, readForm, field, fileField, HttpError, sendJson } from '../http.js';
-import { requireUser, isAdmin, isTeacher, hashPassword, verifyPassword, rateLimit } from '../auth.js';
+import { requireUser, isAdmin, isTeacher, hashPassword, verifyPassword, rateLimit, normalizePhone, phoneTaken } from '../auth.js';
 import { askAI, saveUpload, uploadDir } from '../services.js';
 import { page, pageHead } from '../views/layout.js';
 import { html, raw, cx, markdown } from '../views/html.js';
@@ -285,6 +285,10 @@ async function saveProfile(ctx) {
     data.user_type = type;
     if (type === 'teacher' && user.role === 'user') requestTeacherApproval(user.id, data.full_name);
   }
+  const rawPhone = data.phone;
+  data.phone = normalizePhone(rawPhone) || null;
+  if (rawPhone && !data.phone) return redirect(ctx, '/profile?tab=info', { type: 'error', msg: ctx.t('err_phone') });
+  if (phoneTaken(data.phone, user.id)) return redirect(ctx, '/profile?tab=info', { type: 'error', msg: ctx.t('err_phone_taken') });
   if (photo) data.photo_url = await saveUpload(photo, 'image');
   q.update('users', user.id, data);
   redirect(ctx, '/profile?tab=info', { msg: ctx.t('profile_updated') });

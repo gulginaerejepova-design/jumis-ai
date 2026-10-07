@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import { q, sha256, notify, json, randomToken } from '../db.js';
 import { send, redirect, readForm, field, fileField, HttpError, safeNext } from '../http.js';
-import { requireUser, rateLimit } from '../auth.js';
+import { requireUser, rateLimit, normalizePhone, phoneTaken } from '../auth.js';
 import { askAI, sendEmail, saveUpload } from '../services.js';
 import { page } from '../views/layout.js';
 import { html, raw, cx, markdown } from '../views/html.js';
@@ -205,7 +205,9 @@ async function enroll(ctx) {
   const id_number = field(form, 'id_number', 30) || enrollment?.id_number;
   const phone = field(form, 'phone', 20) || enrollment?.phone;
   if (!id_number || !phone) return redirect(ctx, back, { type: 'error', msg: ctx.t('fill_required') });
-  q.update('users', user.id, { id_number, phone });
+  // Keep the account phone (used for login) normalized and unique
+  const loginPhone = normalizePhone(phone);
+  q.update('users', user.id, { id_number, phone: loginPhone && !phoneTaken(loginPhone, user.id) ? loginPhone : user.phone });
 
   // Without an email service the code could never arrive, so enrollment is confirmed directly.
   if (!process.env.RESEND_API_KEY) {
